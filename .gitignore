@@ -1,0 +1,12 @@
+# Ignore Python cache and migrations
+backend/__pycache__/
+backend/migrations/
+
+# Ignore environment and credentials files
+.env
+backend/.env
+backend/credentials.json
+token.json
+
+# Ignore deployment-specific files
+procfile
