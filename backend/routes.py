@@ -10,8 +10,10 @@ from backend.utils import generate_random_password
 from flask_mail import Mail, Message
 from backend.calender import add_appointment, get_google_credentials, cancel_event
 import json
+from flask import current_app
 
 main = Blueprint('main', __name__)
+
 
 
 @jwt.unauthorized_loader
@@ -199,7 +201,7 @@ def get_appointments():
         
 
         # current_appointments = Appointment.query.all()
-        booked_appointments = Appointment.query.filter_by(appointment_date=appointment_date).all()
+        booked_appointments = Appointment.query.filter_by(appointment_date=appointment_date, status='scheduled').all()
         print(booked_appointments)
         booked_slots = []
         for appointment in booked_appointments:
@@ -209,7 +211,7 @@ def get_appointments():
             })
         print(f'booked_slots{booked_slots}')
         result_slots = []
-        print(f'availablr_slots {available_slots}')
+        print(f'available_slots {available_slots}')
         for slot in available_slots:
             if any(slot['start_time'] == booked['start_time'] and slot['end_time'] == booked['end_time'] for booked in booked_slots):
                 slot['status'] = 'booked'
@@ -309,7 +311,7 @@ def get_user_appointments(user_id):
     if not user:
         return jsonify({'message': 'User not Found'}), 404
     
-    all_appointments = Appointment.query.filter_by(user_id=user_id).all()
+    all_appointments = Appointment.query.filter_by(user_id=user_id, status='scheduled').all()
     print("all_appointments:", all_appointments)
     upcoming_app = []
 
@@ -353,6 +355,9 @@ def get_user_details():
     try:
         print("calling get_user_details API")
         user_token = get_jwt_identity()
+        if isinstance(user_token, str):
+            user_token = json.loads(user_token)
+        print(user_token, type(user_token))
         if not user_token:
             print("no user token provided!")
             return jsonify({'message': 'no_token', 'status_code': 404}), 404
@@ -372,8 +377,13 @@ def get_user_details():
         except:
             first_name = name
             last_name  = " "
-        dob = user.date_of_birth
-        formatted_date = dob.strftime("%d-%m-%Y")
+        if user.address == 'not_added':
+            dob = 'Not added'
+            formatted_date = dob
+        else:
+            dob = user.date_of_birth
+            formatted_date = dob.strftime("%d-%m-%Y")
+        
         address = user.address
         problem = user.problem
         phone_number = user.phone_number
@@ -403,11 +413,12 @@ def new_user_appointment():
     first_name = data.get('first_name').strip()
     last_name = data.get('last_name').strip()
     email = data.get('email')
-    date_of_birth = data.get('date_of_birth')
+    date_of_birth = None
     phone_number = data.get('phone_number')
-    problem = data.get('problem')
+    city = data.get('city')
+    description = data.get('description')       
 
-    if not all([first_name, last_name, email, date_of_birth, phone_number, problem]):
+    if not all([first_name, last_name, email, phone_number, description]):
         return jsonify({'message': 'All fields are required', 'status_code': 400}), 400
     
     existing_user = Users.query.filter_by(email=email).first()
@@ -420,9 +431,8 @@ def new_user_appointment():
     name = first_name + ' ' + last_name
     doctor_id = "033273c5-25e5-4b26-b125-a0a4b2e594d7"
     appointment_date = data.get('appointment_date')
-    start_time = data.get('start_time')
-    end_time = data.get('end_time')
-    description = data.get('description')
+    start_time = '07:00:00'
+    end_time = '08:00:00'
     try:
         new_user = Users(
             name = name,
@@ -455,10 +465,50 @@ def new_user_appointment():
         add_appointment(email, appointment_date, start_time, end_time, description)
 
 
-        msg = Message('Your Account Details for Digismile',
-                    recipients=[email])
-        msg.body = f"Dear {first_name}, Your account has been created successfully. Please use the following credentials to log in:\n\nEmail: {email}\nPassword: {generated_password}\n\nThank you!"
+        msg = Message(
+            '🎉 Welcome to DigiSmile! Your Account is Ready! 🎉',
+            recipients=[email]
+        )
+        msg.body = f"""
+        Hi {first_name}, 👋  
+
+        We're thrilled to have you at **smilexpertsdental!** 😁✨  
+
+        Your account is now set up, and you’re all set to book your first appointment. Here are your login details:  
+
+        🔹 Email: `{email}`  
+        🔹 Password: `{generated_password}`    
+
+        👉 **Log in now** and manage your appointments effortlessly!  
+
+        🔗 [Visit smilexpertsdental](https://smilexpertsdental.com)  
+
+        If you have any questions, feel free to reach out. We're here to keep your smile shining! 😃  
+
+        **Stay Smiling,**  
+        **The smilexpertsdental Team** 🦷💙  
+        """
+
         mail.send(msg)
+        
+        clinic_mail = 'Smilexpertsdc@gmail.com' if 'dc' in city else 'Smilexpertsburke@gmail.com'
+        clinic_name = 'DC' if 'dc' in city else 'Burke'
+        msg_to_office = Message('New Appointment!!',
+            recipients=[clinic_mail])
+        msg_to_office.body = f"""
+            Hey {clinic_name} Clinic,  
+
+            Just a heads-up! 🏥 A new appointment has been booked.  
+
+            📌 **Patient Name:** {name}  
+            📧 **Email:** {email}  
+            📅 **Appointment Date:** {appointment_date}  
+            📝 **Description:** {description}  
+
+            Thanks, and see you soon! 😊  
+            """ 
+        mail.send(msg_to_office)
+
         return jsonify({'message': 'Appointment booked successfully!', 'appointment_id':str(new_appointment.appointment_id), 'status_code': 201}), 201
     except Exception as e:
         db.session.rollback()
@@ -473,6 +523,8 @@ def change_password():
 
         user_token = get_jwt_identity()
         print(f'user token : {user_token}')
+        if isinstance(user_token, str):
+            user_token = json.loads(user_token)
         user_id = user_token["user_id"]
         print(data)
         old_pass = data.get('old_password')
@@ -533,6 +585,8 @@ def forget_password():
     data = request.json
     email = data.get('email').strip()
     user = Users.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'error': 'User not found', 'status_code': 404}), 404
 
     generated_password = generate_random_password()
     password_hash_new = bcrypt.generate_password_hash(generated_password).decode('utf-8')
@@ -540,27 +594,91 @@ def forget_password():
     user.password_hash = password_hash_new
     db.session.commit()
 
-    msg = Message('Your Account Details for Digismile',
-                    recipients=[email])
-    msg.body = f"Dear User, Your account has been resetted. Please use the following credentials to log in:\n\nEmail: {email}\nPassword: {generated_password}\n\nThank you!"
+    msg = Message('Your Account Details for smilexpertsdental', recipients=[email])
+    msg.body = f"""
+    Hey {email},  
+
+    Your password has been successfully reset! 🎉  
+
+    🔹 Email: {email}  
+    🔹 Temporary Password: {generated_password}  
+
+    Log in using the credentials above, and don’t forget—you can update your password anytime in your profile settings! 🔐  
+
+    Stay secure, and happy browsing! 🚀  
+
+    Cheers,  
+    The Smilexperts Team  
+    """
     mail.send(msg)
     return jsonify({'message': 'forget success!!', 'status_code': 201}), 201
 
 
 @main.route('/reschedule_appointment', methods=['POST'])
 def reschedule_appointment():
-    data = request.json
-    email = data.get('email').strip()
-    appointment_id = data.get('appointment_id')
-    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'message': 'No input data provided', 'status_code': 400}), 400
+        # email = data.get('email').strip()
+        appointment_id = data.get('appointment_id')
+        
+        if not appointment_id:
+            return jsonify({'message': 'Missing email or appointment ID', 'status_code': 400}), 400
+        
+        appointment = Appointment.query.filter_by(appointment_id=appointment_id).first()
+        if not appointment:
+            return jsonify({'message': 'appointment not found', 'status_code': 404}), 404
+        
+        if appointment.status != 'scheduled':
+            return jsonify({'message': 'Appointment not in scheduled state', 'status_code': 400}), 400
+        
+        appointment.status = 'rescheduled'
+        db.session.commit()
 
-@main.route('/get_appointments', methods=['GET'])
-def get_appointments():
+        # Calling existing booking API to create a new appointment
+        appointment_date = data.get('appointment_date')
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+        description = data.get('description', '')
+        location = data.get('location', '')
+
+        new_appointment_data = {
+        'appointment_date': appointment_date,
+        'start_time': start_time,
+        'end_time': end_time,
+        'description': description,
+        'location': location
+        }
+        token = data.get('bearer_token')
+        jwt_token = f"Bearer {token}"
+
+        with current_app.test_request_context(
+            '/book_existing_existing_user',
+            method='POST',
+            json = new_appointment_data,
+            headers = {"Authorization": jwt_token}
+        ):
+            response = book_appointment_existing_user()
+        
+        print("========================================")
+        print(response)
+        if response[1] == 201:
+            return jsonify({'message': 'Appointment rescheduled successfully!', 'status_code': 201}), 201
+        else:
+            return jsonify({'message': 'Failed to create new appointment!', 'status_code':500}), 500
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({'message': 'An error occurred while rescheduling the appointment', 'status_code': 500}), 500
+
+
+@main.route('/get_patient_appointments', methods=['POST'])
+def get_patient_appointments():
     data = request.json
     appointment_date = data.get('appointment_date', '') #yyyy-mm-dd
     if appointment_date:
         try:
-            formatted_date = datetime.strptime(appointment_date, '%Y-%m-%d')
+            formatted_date = datetime.strptime(appointment_date, '%Y-%m-%d').date()
             print(formatted_date)
         except ValueError:
             print("Invalid date format. Expected YYY-MM-DD")
@@ -569,17 +687,38 @@ def get_appointments():
         return jsonify({'message': 'No appointment date provided', 'status_code': 400}), 400
     
     all_appointments = Appointment.query.filter_by(appointment_date=formatted_date).all()
+    print('all_appointments', all_appointments)
     appointments = []
     for a in all_appointments:
-        if a.appointment_date == formatted_date:
+        appointment_date_database = datetime.strftime(a.appointment_date, "%Y-%m-%d")
+
+        if appointment_date_database == appointment_date:
+            user_id = a.user_id
+            user = Users.query.filter_by(user_id=user_id).first()
+            if a.location:
+                location = a.location
+            else:
+                location = 'not present'
+
+            if user.phone_number:
+                phone_number = user.phone_number
+            else:
+                phone_number = 'not present'
             appointments.append({
+            'patient': str(user.name),
+            'description': a.description,
+            'phone_number': str(phone_number),
+            'location': str(location),
             'date': str(a.appointment_date),
             'start_time': str(a.start_time),
             'end_time': str(a.end_time),
-            'description': a.description
+            
             })
             print(f'appointment_id {a.appointment_id} is for day ')
 
-
+    return jsonify({
+        'appointments': appointments,
+        'status_code': 200
+    }), 200
     
     
